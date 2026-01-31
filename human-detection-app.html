@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Human Detection System</title>
+    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function HumanDetectionApp() {
+            const [image, setImage] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [modelsLoaded, setModelsLoaded] = useState(false);
+            const [detections, setDetections] = useState(null);
+            const canvasRef = useRef(null);
+            const imageRef = useRef(null);
+
+            useEffect(() => {
+                loadModels();
+            }, []);
+
+            const loadModels = async () => {
+                setLoading(true);
+                try {
+                    const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+                    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+                    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+                    await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+                    await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+                    await faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL);
+                    setModelsLoaded(true);
+                } catch (error) {
+                    console.error('Error loading models:', error);
+                    alert('Failed to load detection models. Please refresh the page.');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        setImage(event.target.result);
+                        setDetections(null);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const detectFeatures = async () => {
+                if (!image || !modelsLoaded) return;
+
+                setLoading(true);
+                try {
+                    const img = imageRef.current;
+                    const canvas = canvasRef.current;
+
+                    const detectionResults = await faceapi
+                        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions())
+                        .withFaceLandmarks()
+                        .withFaceExpressions()
+                        .withAgeAndGender();
+
+                    const displaySize = { width: img.width, height: img.height };
+                    faceapi.matchDimensions(canvas, displaySize);
+
+                    const resizedDetections = faceapi.resizeResults(detectionResults, displaySize);
+
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    resizedDetections.forEach((detection) => {
+                        const box = detection.detection.box;
+                        ctx.strokeStyle = '#00ff00';
+                        ctx.lineWidth = 3;
+                        ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+                        const landmarks = detection.landmarks;
+                        const positions = landmarks.positions;
+                        
+                        ctx.fillStyle = '#ff0000';
+                        positions.forEach(point => {
+                            ctx.beginPath();
+                            ctx.arc(point.x, point.y, 2, 0, 2 * Math.PI);
+                            ctx.fill();
+                        });
+
+                        ctx.fillStyle = '#00ff00';
+                        ctx.font = '16px Arial';
+                        const age = Math.round(detection.age);
+                        const gender = detection.gender;
+                        const expression = Object.entries(detection.expressions).reduce((a, b) => 
+                            a[1] > b[1] ? a : b
+                        )[0];
+                        
+                        ctx.fillText(`${gender}, ${age}y, ${expression}`, box.x, box.y - 10);
+                    });
+
+                    setDetections(resizedDetections);
+                } catch (error) {
+                    console.error('Detection error:', error);
+                    alert('Error during detection. Please try another image.');
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            useEffect(() => {
+                if (image && modelsLoaded) {
+                    detectFeatures();
+                }
+            }, [image, modelsLoaded]);
+
+            return (
+                <div style={styles.container}>
+                    <div style={styles.header}>
+                        <h1 style={styles.title}>Human Detection System</h1>
+                        <p style={styles.subtitle}>Upload an image to detect faces and analyze features</p>
+                    </div>
+
+                    <div style={styles.uploadSection}>
+                        <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageUpload}
+                            style={styles.fileInput}
+                            id="fileInput"
+                        />
+                        <label htmlFor="fileInput" style={styles.uploadButton}>
+                            {loading ? 'Processing...' : 'Choose Image'}
+                        </label>
+                    </div>
+
+                    {!modelsLoaded && (
+                        <div style={styles.loadingText}>Loading detection models...</div>
+                    )}
+
+                    {image && (
+                        <div style={styles.imageContainer}>
+                            <div style={styles.canvasWrapper}>
+                                <img
+                                    ref={imageRef}
+                                    src={image}
+                                    alt="Uploaded"
+                                    style={styles.image}
+                                    crossOrigin="anonymous"
+                                />
+                                <canvas
+                                    ref={canvasRef}
+                                    style={styles.canvas}
+                                />
+                            </div>
+
+                            {detections && (
+                                <div style={styles.results}>
+                                    <h3 style={styles.resultsTitle}>Detection Results</h3>
+                                    <p style={styles.detectionCount}>
+                                        Detected {detections.length} face(s)
+                                    </p>
+                                    {detections.map((detection, index) => (
+                                        <div key={index} style={styles.detectionCard}>
+                                            <h4 style={styles.detectionHeader}>Face {index + 1}</h4>
+                                            <p>Age: {Math.round(detection.age)} years</p>
+                                            <p>Gender: {detection.gender} ({Math.round(detection.genderProbability * 100)}%)</p>
+                                            <p>Expression: {Object.entries(detection.expressions)
+                                                .reduce((a, b) => a[1] > b[1] ? a : b)[0]} 
+                                                ({Math.round(Object.entries(detection.expressions)
+                                                .reduce((a, b) => a[1] > b[1] ? a : b)[1] * 100)}%)
+                                            </p>
+                                            <p>Confidence: {Math.round(detection.detection.score * 100)}%</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const styles = {
+            container: {
+                maxWidth: '1200px',
+                margin: '0 auto',
+                padding: '20px',
+                fontFamily: 'Arial, sans-serif',
+                backgroundColor: '#0a0a0a',
+                minHeight: '100vh',
+                color: '#ffffff'
+            },
+            header: {
+                textAlign: 'center',
+                marginBottom: '30px'
+            },
+            title: {
+                fontSize: '32px',
+                fontWeight: 'bold',
+                margin: '0 0 10px 0',
+                color: '#00ff00'
+            },
+            subtitle: {
+                fontSize: '16px',
+                color: '#888888',
+                margin: 0
+            },
+            uploadSection: {
+                textAlign: 'center',
+                marginBottom: '30px'
+            },
+            fileInput: {
+                display: 'none'
+            },
+            uploadButton: {
+                display: 'inline-block',
+                padding: '12px 30px',
+                backgroundColor: '#00ff00',
+                color: '#000000',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '16px',
+                fontWeight: 'bold',
+                transition: 'background-color 0.3s'
+            },
+            loadingText: {
+                textAlign: 'center',
+                color: '#00ff00',
+                fontSize: '18px'
+            },
+            imageContainer: {
+                display: 'flex',
+                gap: '20px',
+                flexWrap: 'wrap'
+            },
+            canvasWrapper: {
+                position: 'relative',
+                flex: '1',
+                minWidth: '300px'
+            },
+            image: {
+                width: '100%',
+                height: 'auto',
+                display: 'block',
+                borderRadius: '8px'
+            },
+            canvas: {
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                pointerEvents: 'none'
+            },
+            results: {
+                flex: '0 0 300px',
+                backgroundColor: '#1a1a1a',
+                padding: '20px',
+                borderRadius: '8px',
+                border: '1px solid #333333'
+            },
+            resultsTitle: {
+                margin: '0 0 15px 0',
+                fontSize: '20px',
+                color: '#00ff00'
+            },
+            detectionCount: {
+                fontSize: '16px',
+                marginBottom: '20px',
+                color: '#cccccc'
+            },
+            detectionCard: {
+                backgroundColor: '#0f0f0f',
+                padding: '15px',
+                borderRadius: '4px',
+                marginBottom: '15px',
+                border: '1px solid #00ff00'
+            },
+            detectionHeader: {
+                margin: '0 0 10px 0',
+                fontSize: '16px',
+                color: '#00ff00'
+            }
+        };
+
+        ReactDOM.render(<HumanDetectionApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
